@@ -5,12 +5,10 @@ import {
 	deleteRecordRequestSchema,
 } from "./interfaces";
 import RecordService from "./service";
-import { getDB } from "./database";
 
 const recordRouter = () => {
 	const router = Router();
-	const db = getDB();
-	const recordService = new RecordService(db);
+	const recordService = new RecordService();
 
 	router.get("/:year/:month", async (req: Request, res: Response) => {
 		const { year, month } = req.params;
@@ -25,6 +23,7 @@ const recordRouter = () => {
 			Number(year),
 			Number(month)
 		);
+
 		res.json(records);
 	});
 

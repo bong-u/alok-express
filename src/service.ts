@@ -1,52 +1,45 @@
-import sqlite3 from "sqlite3";
-import { Record, RecordsResponse } from "./interfaces";
-import { promisify } from "util";
+import { Record, MonthRecord, RecordsByPeriod } from "./interfaces";
+import { PrismaClient } from "@prisma/client";
+
+const prisma = new PrismaClient();
 
 export default class RecordService {
-	db: sqlite3.Database;
-
-	constructor(db: sqlite3.Database) {
-		this.db = db;
-		this.dbAll = promisify<string, any[]>(this.db.all).bind(this.db);
-		this.dbGet = promisify<string, any>(this.db.get).bind(this.db);
-		this.dbRun = promisify<string, void>(this.db.run).bind(this.db);
-	}
-
-	private dbAll: (sql: string, params?: any[]) => Promise<any[]>;
-	private dbGet: (sql: string, params?: any[]) => Promise<any>;
-	private dbRun: (sql: string, params?: any[]) => Promise<void>;
-
 	async getRecordsByMonth(
 		year: number,
 		month: number
-	): Promise<RecordsResponse> {
+	): Promise<RecordsByPeriod> {
 		const formattedMonth = month < 10 ? `0${month}` : `${month}`; // 1자리 월을 2자리로 변환
-		const sql = `SELECT * FROM records WHERE strftime('%Y-%m', date) = ?`;
-		const rows = await this.dbAll(sql, [`${year}-${formattedMonth}`]);
 
-		return rows.reduce(
-			(acc: RecordsResponse, { date, drinkType, amount }: Record) => {
+		const records = await prisma.record.findMany({
+			where: {
+				date: {
+					startsWith: `${year}-${formattedMonth}`,
+				},
+			},
+		}) as Record[];
+
+		return records.reduce(
+			(acc: RecordsByPeriod, { date, drinkType, amount }: Record) => {
 				if (!acc[date]) {
 					acc[date] = [];
 				}
 				acc[date].push({ drinkType, amount });
 				return acc;
 			},
-			{} as RecordsResponse
+			{} as RecordsByPeriod
 		);
 	}
 
-	async getRecordsByYear(year: number): Promise<RecordsResponse> {
-		const sql = `
-		SELECT strftime('%m', date) as month, drinkType, SUM(amount) as amount
-		FROM records
-		WHERE strftime('%Y', date) = ?
-		GROUP BY strftime('%m', date), drinkType
-		`;
-		const rows = await this.dbAll(sql, [`${year}`]);
+	async getRecordsByYear(year: number): Promise<RecordsByPeriod> {
+		const records = await prisma.$queryRaw<MonthRecord[]
+		>`SELECT strftime('%m', date) as month, drink_type as drinkType, SUM(amount) as amount
+			FROM Record
+			WHERE strftime('%Y', date) = ${year.toString()}
+			GROUP BY strftime('%m', date), drink_type
+		` as MonthRecord[];
 
-		return rows.reduce(
-			(acc: RecordsResponse, { month, drinkType, amount }) => {
+		return records.reduce(
+			(acc: RecordsByPeriod, { month, drinkType, amount }: MonthRecord) => {
 				const monthKey = `${year}-${month}`;
 				if (!acc[monthKey]) {
 					acc[monthKey] = [];
@@ -54,36 +47,49 @@ export default class RecordService {
 				acc[monthKey].push({ drinkType, amount });
 				return acc;
 			},
-			{} as RecordsResponse
+			{} as RecordsByPeriod
 		);
 	}
 
 	async getRecordsByDate(date: string): Promise<Record[]> {
-		const sql = "SELECT * FROM records WHERE date = ?";
-		const rows = await this.dbAll(sql, [date]);
-		return rows as Record[];
+		return await prisma.record.findMany({
+			where: {
+				date,
+			},
+		}) as Record[];
 	}
 
 	async getRecordByDateAndDrinkType(
 		date: string,
 		drinkType: string
-	): Promise<Record> {
-		const sql = "SELECT * FROM records WHERE date = ? AND drinkType = ?";
-		const row = await this.dbGet(sql, [date, drinkType]);
-		return row as Record;
+	): Promise<Record | null> {
+		return await prisma.record.findUnique({
+			where: {
+				date_drinkType: {
+					date,
+					drinkType,
+				},
+			},
+		}) as Record | null;
 	}
 
 	async createRecord(record: Record): Promise<void> {
-		const sql =
-			"INSERT INTO records (date, drinkType, amount) VALUES (?, ?, ?)";
-		await this.dbRun(sql, [record.date, record.drinkType, record.amount]);
+		await prisma.record.create({
+			data: record,
+		});
 	}
 
 	async deleteRecordByDateAndDrinkType(
 		date: string,
 		drinkType: string
 	): Promise<void> {
-		const sql = "DELETE FROM records WHERE date = ? AND drinkType = ?";
-		await this.dbRun(sql, [date, drinkType]);
+		await prisma.record.delete({
+			where: {
+				date_drinkType: {
+					date,
+					drinkType,
+				},
+			},
+		});
 	}
 }

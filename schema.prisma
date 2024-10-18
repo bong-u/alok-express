@@ -1,0 +1,19 @@
+// schema.prisma
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Record {
+  date       String
+  drinkType  String   @map("drink_type")
+  amount     Float 
+// createdAt  DateTime @default(now()) @map("created_at")
+
+  @@id([date, drinkType])
+}
+

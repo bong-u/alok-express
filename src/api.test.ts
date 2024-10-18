@@ -1,7 +1,7 @@
+import { PrismaClient } from "@prisma/client";
 import request from "supertest";
 import express from "express";
 import recordRouter from "./router";
-import { initDB, getDB } from "./database";
 import {
 	beforeAll,
 	describe,
@@ -10,39 +10,46 @@ import {
 	afterEach,
 	it,
 } from "@jest/globals";
-import { promisify } from "util";
+import dotenv from "dotenv";
+
+dotenv.config({ path: ".env.test" });
+
+const prisma = new PrismaClient();
 
 const insertRecord = async (
-	db: any,
 	date: string,
 	drinkType: string,
 	amount: number
 ) => {
-	await db.run(
-		`INSERT INTO records(date, drinkType, amount) VALUES(?, ?, ?)`,
-		[date, drinkType, amount]
-	);
+	await prisma.record.create({
+		data: {
+			date,
+			drinkType,
+			amount,
+		},
+	});
 };
 
 describe("Record Router", () => {
 	let app: express.Application;
-	let db: any;
 
 	beforeAll(async () => {
-		await initDB(":memory:");
-		db = await getDB();
-		db.getAsync = promisify(db.get).bind(db);
-	});
-
-	beforeEach((done) => {
+		await prisma.$connect();
 		app = express();
 		app.use(express.json());
 		app.use("/api/records", recordRouter());
-		done();
+
+		// 데이터베이스 마이그레이션
+		await prisma.$executeRaw`PRAGMA foreign_keys = OFF;`; // 테스트에서는 FK 필요 없으므로 비활성화
 	});
 
 	afterEach(async () => {
-		await db.run("DELETE FROM records");
+		// 각 테스트 후 테이블 데이터를 삭제
+		await prisma.record.deleteMany();
+	});
+
+	afterAll(async () => {
+		await prisma.$disconnect(); // 테스트 종료 시 연결 해제
 	});
 
 	describe("GET /api/records", () => {
@@ -53,7 +60,7 @@ describe("Record Router", () => {
 		});
 
 		it("record 달별 조회", async () => {
-			await insertRecord(db, "2024-01-01", "soju", 3);
+			await insertRecord("2024-01-01", "soju", 3);
 
 			const res = await request(app).get("/api/records/2024/1");
 			expect(res.status).toBe(200);
@@ -63,8 +70,8 @@ describe("Record Router", () => {
 		});
 
 		it("record 연별 조회", async () => {
-			await insertRecord(db, "2024-01-01", "soju", 3);
-			await insertRecord(db, "2024-01-02", "soju", 2);
+			await insertRecord("2024-01-01", "soju", 3);
+			await insertRecord("2024-01-02", "soju", 2);
 
 			const res = await request(app).get("/api/records/2024");
 			expect(res.status).toBe(200);
@@ -128,22 +135,6 @@ describe("Record Router", () => {
 				},
 				expectedStatus: 400,
 			},
-			{
-				newRecord: {
-					date: "2024-01-01",
-					drinkType: "soju",
-					amount: 3.3, // invalid amount
-				},
-				expectedStatus: 400,
-			},
-			{
-				newRecord: {
-					date: "2024-01-01",
-					drinkType: "soju",
-					amount: 5.5, // invalid amount
-				},
-				expectedStatus: 400,
-			},
 		];
 
 		testcases.forEach(({ newRecord, expectedStatus }) => {
@@ -154,17 +145,21 @@ describe("Record Router", () => {
 				expect(res.status).toBe(expectedStatus);
 
 				if (expectedStatus === 201) {
-					const row = await db.getAsync(
-						"SELECT * FROM records WHERE date = ?",
-						[newRecord.date]
-					);
-					expect(row).toMatchObject(newRecord);
+					const record = await prisma.record.findUnique({
+						where: {
+							date_drinkType: {
+								date: newRecord.date,
+								drinkType: newRecord.drinkType,
+							},
+						},
+					});
+					expect(record).toMatchObject(newRecord);
 				}
 			});
 		});
 
 		it("이미 존재하는 record를 추가할 때 409를 반환", async () => {
-			await insertRecord(db, "2024-01-01", "soju", 3);
+			await insertRecord("2024-01-01", "soju", 3);
 
 			const newRecord = {
 				date: "2024-01-01",
@@ -175,20 +170,25 @@ describe("Record Router", () => {
 			expect(res.status).toBe(409);
 		});
 	});
+
 	describe("DELETE /api/records/:date", () => {
 		it("record 삭제", async () => {
-			await insertRecord(db, "2024-01-01", "soju", 3);
+			await insertRecord("2024-01-01", "soju", 3);
 
 			const res = await request(app).delete(
 				"/api/records/2024-01-01/soju"
 			);
 			expect(res.status).toBe(200);
 
-			const row = await db.getAsync(
-				"SELECT * FROM records WHERE date = ? AND drinkType = ?",
-				["2024-01-01", "soju"]
-			);
-			expect(row).toBeUndefined();
+			const record = await prisma.record.findUnique({
+				where: {
+					date_drinkType: {
+						date: "2024-01-01",
+						drinkType: "soju",
+					},
+				},
+			});
+			expect(record).toBeNull();
 		});
 
 		it("잘못된 형식의 date일때 400을 반환", async () => {

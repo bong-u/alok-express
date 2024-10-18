@@ -1,11 +1,8 @@
 import express from "express";
 import cors from "cors";
 import recordRouter from "./router";
-import { initDB } from "./database";
 
 const app = express();
-
-initDB('db.sqlite3');
 
 app.use(
 	cors({

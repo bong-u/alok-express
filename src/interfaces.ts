@@ -1,21 +1,23 @@
 import Joi from "joi";
 
 const drinkTypeValues = ["soju", "beer"] as const;
-type DrinkType = (typeof drinkTypeValues)[number];
+export type DrinkType = (typeof drinkTypeValues)[number];
 
-export interface Record {
-	date: string;
+export interface DrinkRecord {
 	drinkType: DrinkType;
 	amount: number;
 }
 
-export interface DrinkRecord {
-	drinkType: string;
-	amount: number;
+export interface Record extends DrinkRecord {
+	date: string;
 }
 
-export interface RecordsResponse {
-	[date: string]: DrinkRecord[];
+export interface MonthRecord extends DrinkRecord {
+	month: string;
+}
+
+export interface RecordsByPeriod {
+	[period: string]: DrinkRecord[];
 }
 
 export const getRecordsSchema = Joi.object({
